@@ -1,4 +1,6 @@
-const io = require('socket.io')(5000)
+const port = process.env.PORT || 5000
+const io = require('socket.io')(port)
+
 
 io.on('connection', socket => {
   const id = socket.handshake.query.id
