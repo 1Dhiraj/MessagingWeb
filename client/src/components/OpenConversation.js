@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react'
-import { Form, InputGroup, Button } from 'react-bootstrap'
+import { useState, useCallback } from 'react'
+import { Form, Button } from 'react-bootstrap'
 import { useConversations } from '../contexts/ConversationsProvider';
 
 export default function OpenConversation() {
@@ -23,18 +23,59 @@ export default function OpenConversation() {
 
   return (
     <div className="d-flex flex-column flex-grow-1" style={{ zIndex: 1, backgroundColor: 'transparent' }}>
+      <style>{`
+        @media (max-width: 768px) {
+          .conversation-header {
+            min-height: 50px !important;
+            padding: 0.5rem 1rem !important;
+          }
+          .conversation-header .avatar {
+            width: 32px !important;
+            height: 32px !important;
+            margin-right: 10px !important;
+          }
+          .conversation-header .avatar svg {
+            width: 18px !important;
+            height: 18px !important;
+          }
+          .conversation-header .name {
+            font-size: 1rem !important;
+          }
+          .messages-area {
+            padding: 1rem !important;
+          }
+          .message-item {
+            max-width: 85% !important;
+          }
+          .input-area {
+            padding: 1rem !important;
+          }
+          .input-area .form-control {
+            height: 40px !important;
+            font-size: 0.9rem !important;
+          }
+          .send-button {
+            width: 40px !important;
+            height: 40px !important;
+          }
+          .send-button svg {
+            width: 18px !important;
+            height: 18px !important;
+          }
+        }
+      `}</style>
       {/* Header */}
-      <div className="d-flex align-items-center px-4 py-2 shadow-sm" style={{ backgroundColor: '#f0f2f5', borderBottom: '1px solid #d1d7db', minHeight: '65px' }}>
-        <div style={{ width: '42px', height: '42px', borderRadius: '50%', backgroundColor: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '15px' }}>
+      <div className="conversation-header d-flex align-items-center px-4 py-2 shadow-sm" style={{ backgroundColor: '#f0f2f5', borderBottom: '1px solid #d1d7db', minHeight: '65px' }}>
+        <div className="avatar" style={{ width: '42px', height: '42px', borderRadius: '50%', backgroundColor: '#dfe5e7', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '15px' }}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="#8696a0"><path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 5C13.66 5 15 6.34 15 8C15 9.66 13.66 11 12 11C10.34 11 9 9.66 9 8C9 6.34 10.34 5 12 5ZM12 19.2C9.5 19.2 7.29 17.92 6 15.98C6.03 13.99 10 12.9 12 12.9C13.99 12.9 17.97 13.99 18 15.98C16.71 17.92 14.5 19.2 12 19.2Z" /></svg>
         </div>
-        <div className="font-weight-bold" style={{ color: '#111b21', fontSize: '1.1rem' }}>
+        <div className="name font-weight-bold" style={{ color: '#111b21', fontSize: '1.1rem' }}>
           {selectedConversation.recipients.map(r => r.name).join(', ')}
         </div>
       </div>
 
       {/* Messages Area */}
-      <div className="flex-grow-1 overflow-auto p-4 custom-scrollbar">
+      <div className="messages-area flex-grow-1 overflow-auto p-4 custom-scrollbar">
         <div className="d-flex flex-column align-items-start justify-content-end px-3">
           {selectedConversation.messages.map((message, index) => {
             const lastMessage = selectedConversation.messages.length - 1 === index
@@ -42,7 +83,7 @@ export default function OpenConversation() {
               <div
                 ref={lastMessage ? setRef : null}
                 key={index}
-                className={`my-1 d-flex flex-column ${message.fromMe ? 'align-self-end align-items-end' : 'align-items-start'}`}
+                className={`message-item my-1 d-flex flex-column ${message.fromMe ? 'align-self-end align-items-end' : 'align-items-start'}`}
                 style={{ maxWidth: '75%' }}
               >
                 <div
@@ -64,7 +105,7 @@ export default function OpenConversation() {
       </div>
 
       {/* Input Area */}
-      <div className="p-3" style={{ backgroundColor: '#f0f2f5' }}>
+      <div className="input-area p-3" style={{ backgroundColor: '#f0f2f5' }}>
         <Form onSubmit={handleSubmit} className="m-0">
           <Form.Group className="m-0 d-flex align-items-center">
             <Form.Control
@@ -76,7 +117,7 @@ export default function OpenConversation() {
               style={{ height: '45px', resize: 'none', borderRadius: '25px', padding: '10px 20px', border: 'none', boxShadow: 'none' }}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
             />
-            <Button type="submit" className="ml-3 rounded-circle d-flex align-items-center justify-content-center p-0" style={{ width: '45px', height: '45px', backgroundColor: 'var(--primary-dark)', border: 'none', transition: 'background-color 0.2s', flexShrink: 0 }} onMouseOver={e => e.target.style.backgroundColor = 'var(--secondary-color)'} onMouseOut={e => e.target.style.backgroundColor = 'var(--primary-dark)'}>
+            <Button type="submit" className="send-button ml-3 rounded-circle d-flex align-items-center justify-content-center p-0" style={{ width: '45px', height: '45px', backgroundColor: 'var(--primary-dark)', border: 'none', transition: 'background-color 0.2s', flexShrink: 0 }} onMouseOver={e => e.target.style.backgroundColor = 'var(--secondary-color)'} onMouseOut={e => e.target.style.backgroundColor = 'var(--primary-dark)'}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style={{ marginLeft: '2px' }}><path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z" /></svg>
             </Button>
           </Form.Group>

@@ -11,11 +11,31 @@ export function SocketProvider({ id, children }) {
   const [socket, setSocket] = useState()
 
   useEffect(() => {
-    const serverUrl = process.env.REACT_APP_SERVER_URL || 'http://localhost:5000'
+    const serverUrl = process.env.REACT_APP_SERVER_URL || 'https://messagingweb.onrender.com'
     const newSocket = io(
       serverUrl,
-      { query: { id } }
+      {
+        query: { id },
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: Infinity,
+        transports: ['websocket', 'polling']
+      }
     )
+
+    newSocket.on('connect', () => {
+      console.log('Socket connected:', newSocket.id)
+    })
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason)
+    })
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error)
+    })
+
     setSocket(newSocket)
 
     return () => newSocket.close()

@@ -69,3 +69,57 @@ body {
 .animate-slide-up {
   animation: slideUp 0.3s ease forwards;
 }
+
+/* Mobile Responsive Styles */
+@media (max-width: 768px) {
+  body {
+    overflow-y: auto;
+  }
+
+  /* Ensure forms are touch-friendly on mobile */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  textarea,
+  select {
+    font-size: 16px !important; /* Prevents auto-zoom on iOS */
+    min-height: 44px;
+  }
+
+  /* Bootstrap overrides for mobile */
+  .form-control {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .btn {
+    min-height: 44px;
+    padding: 0.5rem 1rem;
+  }
+
+  /* Modal adjustments */
+  .modal-dialog {
+    margin: 1rem;
+  }
+
+  .modal-content {
+    border-radius: 12px;
+  }
+
+  /* Improve tap targets */
+  button, a[role="button"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Flex utilities for responsive layout */
+  .flex-md-row {
+    flex-direction: column;
+  }
+
+  /* Custom scrollbar smaller on mobile */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+}
