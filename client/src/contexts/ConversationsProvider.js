@@ -11,7 +11,7 @@ export function useConversations() {
 
 export function ConversationsProvider({ id, children }) {
   const [conversations, setConversations] = useLocalStorage('conversations', [])
-  const [selectedConversationIndex, setSelectedConversationIndex] = useState(0)
+  const [selectedConversationIndex, setSelectedConversationIndex] = useState(-1)
   const { contacts } = useContacts()
   const socket = useSocket()
 
