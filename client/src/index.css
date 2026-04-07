@@ -1,48 +1,121 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
+/* ── Light theme (default) ── */
 :root {
-  --primary-color: #25D366; /* Vibrant WhatsApp Green */
-  --primary-dark: #128C7E;
+  --primary-color: #25D366;
+  --primary-dark:  #128C7E;
   --secondary-color: #075E54;
-  --bg-light: #f0f2f5;
-  --bg-dark: #111b21;
-  --text-main: #303030;
-  --text-muted: #667781;
-  --border-color: #e1e9eb;
-  
-  --glass-bg: rgba(255, 255, 255, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.3);
-  --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 10px 20px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.12);
+
+  --sidebar-bg:    #ffffff;
+  --header-bg:     #f0f2f5;
+  --chat-bg:       #efeae2;
+  --chat-pattern:  url("https://web.whatsapp.com/img/bg-chat-tile-light_04fcacde539c58cca6745483d4858c52.png");
+  --input-area-bg: #f0f2f5;
+  --input-bg:      #ffffff;
+  --modal-bg:      #ffffff;
+
+  --bubble-out:    #d9fdd3;
+  --bubble-in:     #ffffff;
+  --bubble-text:   #111b21;
+
+  --text-primary:  #111b21;
+  --text-secondary:#3b4a54;
+  --text-muted:    #8696a0;
+
+  --border-color:  #d1d7db;
+  --border-light:  #f0f2f5;
+  --hover-bg:      #f5f6f6;
+  --selected-bg:   #ebebeb;
+
+  --avatar-bg:     #dfe5e7;
+  --avatar-icon:   #8696a0;
+  --icon-color:    #d1d7db;
+
+  --shadow-sm: 0 4px 6px rgba(0,0,0,0.05);
+  --shadow-md: 0 10px 20px rgba(0,0,0,0.08);
+  --glass-bg:  rgba(255,255,255,0.85);
+  --glass-border: rgba(255,255,255,0.3);
+}
+
+/* ── Dark theme ── */
+[data-theme="dark"] {
+  --sidebar-bg:    #111b21;
+  --header-bg:     #202c33;
+  --chat-bg:       #0d1418;
+  --chat-pattern:  none;
+  --input-area-bg: #202c33;
+  --input-bg:      #2a3942;
+  --modal-bg:      #233138;
+
+  --bubble-out:    #005c4b;
+  --bubble-in:     #202c33;
+  --bubble-text:   #e9edef;
+
+  --text-primary:  #e9edef;
+  --text-secondary:#aebac1;
+  --text-muted:    #8696a0;
+
+  --border-color:  #2a3942;
+  --border-light:  #182229;
+  --hover-bg:      #182229;
+  --selected-bg:   #2a3942;
+
+  --avatar-bg:     #2a3942;
+  --avatar-icon:   #8696a0;
+  --icon-color:    #8696a0;
+
+  --glass-bg:   rgba(32,44,51,0.92);
+  --glass-border: rgba(255,255,255,0.08);
+}
+
+/* ── Dark mode: Bootstrap modal overrides ── */
+[data-theme="dark"] .modal-content {
+  background-color: var(--modal-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+[data-theme="dark"] .modal-header,
+[data-theme="dark"] .modal-footer {
+  border-color: var(--border-color) !important;
+}
+[data-theme="dark"] .form-control {
+  background-color: var(--input-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+[data-theme="dark"] .form-control::placeholder { color: var(--text-muted) !important; }
+[data-theme="dark"] .close { color: var(--text-primary) !important; }
+[data-theme="dark"] .list-group-item {
+  background-color: var(--sidebar-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-light) !important;
+}
+[data-theme="dark"] .nav-link { color: var(--text-muted) !important; }
+
+/* ── Base ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: linear-gradient(135deg, #128C7E 0%, #25D366 100%);
-  color: var(--text-main);
-  margin: 0;
-  padding: 0;
-  overflow: hidden; /* App takes full height */
+  color: var(--text-primary);
+  overflow: hidden;
+  transition: background-color 0.3s, color 0.3s;
 }
 
-/* Custom Scrollbar for a premium feel */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.3);
-}
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
 
-/* Glassmorphism Classes */
+/* ── Glassmorphism ── */
 .glass-panel {
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
@@ -51,75 +124,33 @@ body {
   box-shadow: var(--shadow-md);
 }
 
-/* Animations */
+/* ── Animations ── */
 @keyframes fadeInScale {
-  0% { opacity: 0; transform: scale(0.95); }
-  100% { opacity: 1; transform: scale(1); }
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
 }
-
 .animate-fade-in-scale {
-  animation: fadeInScale 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeInScale 0.4s cubic-bezier(0.16,1,0.3,1) forwards;
 }
 
 @keyframes slideUp {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up { animation: slideUp 0.3s ease forwards; }
+
+@keyframes typingDot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%            { transform: translateY(-4px); opacity: 1; }
 }
 
-.animate-slide-up {
-  animation: slideUp 0.3s ease forwards;
-}
-
-/* Mobile Responsive Styles */
+/* ── Mobile ── */
 @media (max-width: 768px) {
-  body {
-    overflow-y: auto;
+  body { overflow-y: auto; }
+
+  input, textarea, select {
+    font-size: 16px !important; /* prevent iOS zoom */
   }
 
-  /* Ensure forms are touch-friendly on mobile */
-  input[type="text"],
-  input[type="email"],
-  input[type="password"],
-  textarea,
-  select {
-    font-size: 16px !important; /* Prevents auto-zoom on iOS */
-    min-height: 44px;
-  }
-
-  /* Bootstrap overrides for mobile */
-  .form-control {
-    min-height: 44px;
-    font-size: 16px;
-  }
-
-  .btn {
-    min-height: 44px;
-    padding: 0.5rem 1rem;
-  }
-
-  /* Modal adjustments */
-  .modal-dialog {
-    margin: 1rem;
-  }
-
-  .modal-content {
-    border-radius: 12px;
-  }
-
-  /* Improve tap targets */
-  button, a[role="button"] {
-    min-width: 44px;
-    min-height: 44px;
-  }
-
-  /* Flex utilities for responsive layout */
-  .flex-md-row {
-    flex-direction: column;
-  }
-
-  /* Custom scrollbar smaller on mobile */
-  ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
+  ::-webkit-scrollbar { width: 3px; }
 }

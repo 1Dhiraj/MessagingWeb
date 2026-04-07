@@ -5,6 +5,7 @@ import Dashboard from './Dashboard'
 import { ContactsProvider } from '../contexts/ContactsProvider'
 import { ConversationsProvider } from '../contexts/ConversationsProvider';
 import { SocketProvider } from '../contexts/SocketProvider';
+import { ThemeProvider } from '../contexts/ThemeContext';
 
 function App() {
   const [id, setId] = useLocalStorage('id')
@@ -20,7 +21,9 @@ function App() {
   )
 
   return (
-    id ? dashboard : <Login onIdSubmit={setId} />
+    <ThemeProvider>
+      {id ? dashboard : <Login onIdSubmit={setId} />}
+    </ThemeProvider>
   )
 }
 
