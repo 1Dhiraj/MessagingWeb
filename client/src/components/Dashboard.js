@@ -46,7 +46,7 @@ export default function Dashboard({ id }) {
           flexDirection: 'column'
         }}
       >
-        <Sidebar id={id} />
+        <Sidebar id={id} onCloseSidebar={() => setMobileView('chat')} />
       </div>
 
       {/* Conversation panel */}
@@ -67,9 +67,36 @@ export default function Dashboard({ id }) {
                 justifyContent: 'center',
                 textAlign: 'center',
                 padding: '2rem',
-                zIndex: 1
+                zIndex: 1,
+                position: 'relative'
               }}
             >
+              <button
+                className="mobile-menu-btn"
+                onClick={() => setMobileView('sidebar')}
+                style={{
+                  position: 'absolute',
+                  top: '16px',
+                  left: '16px',
+                  background: 'white',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '40px',
+                  height: '40px',
+                  display: 'none', // Will override in CSS for mobile
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
+                  cursor: 'pointer',
+                  zIndex: 10
+                }}
+                aria-label="Open Sidebar"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="#667781">
+                  <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+                </svg>
+              </button>
+
               <div
                 style={{
                   width: '120px',
@@ -128,6 +155,12 @@ export default function Dashboard({ id }) {
           }
           .welcome-screen p {
             font-size: 0.95rem;
+          }
+          .mobile-menu-btn {
+            display: flex !important;
+          }
+          .mobile-close-sidebar {
+            display: block !important;
           }
         }
       `}</style>
