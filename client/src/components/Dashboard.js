@@ -6,6 +6,31 @@ import { useConversations } from '../contexts/ConversationsProvider';
 export default function Dashboard({ id }) {
   const { selectedConversation } = useConversations()
   const [mobileView, setMobileView] = useState('sidebar') // 'sidebar' | 'chat'
+  const [viewportHeight, setViewportHeight] = useState('100vh')
+
+  // Listen to visualViewport or window resize to adjust for mobile keyboard
+  useEffect(() => {
+    function handleResize() {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`)
+      } else {
+        setViewportHeight(`${window.innerHeight}px`)
+      }
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize)
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize)
+      }
+    }
+  }, [])
 
   // When a conversation is selected on mobile, switch to chat view
   useEffect(() => {
@@ -24,7 +49,7 @@ export default function Dashboard({ id }) {
       style={{
         display: 'flex',
         flexDirection: 'row',
-        height: '100vh',
+        height: viewportHeight,
         backgroundColor: '#efeae2',
         backgroundImage: 'url("https://web.whatsapp.com/img/bg-chat-tile-light_04fcacde539c58cca6745483d4858c52.png")',
         backgroundRepeat: 'repeat',
@@ -135,7 +160,7 @@ export default function Dashboard({ id }) {
             left: 0;
             width: 100% !important;
             min-width: 100% !important;
-            height: 100vh;
+            height: ${viewportHeight};
             transform: translateX(${mobileView === 'sidebar' ? '0' : '-100%'});
             transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
             z-index: 200 !important;
@@ -145,7 +170,7 @@ export default function Dashboard({ id }) {
             top: 0;
             left: 0;
             width: 100% !important;
-            height: 100vh;
+            height: ${viewportHeight};
             transform: translateX(${mobileView === 'chat' ? '0' : '100%'});
             transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
             z-index: 200 !important;
