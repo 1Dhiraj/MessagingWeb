@@ -269,8 +269,8 @@ export function ConversationsProvider({ id, children }) {
     if (!response.ok) throw new Error('Upload failed')
     const { url, resourceType, originalName } = await response.json()
     let mediaType = resourceType
-    if (file.type.startsWith('audio/')) mediaType = 'audio'
     if (resourceType === 'raw') mediaType = 'document'
+    if (file.type.startsWith('audio/') || originalName.endsWith('.webm')) mediaType = 'audio'
     sendMessage(recipients, caption || '', url, mediaType, originalName || file.name, currentReplyTo || null)
     setReplyToState(null)
   }
