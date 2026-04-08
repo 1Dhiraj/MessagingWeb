@@ -1,5 +1,5 @@
 import React from 'react'
-import { useConversations } from '../contexts/ConversationsProvider';
+import { useConversations } from '../contexts/ConversationsProvider'
 
 function formatLastSeen(ts) {
   if (!ts) return ''
@@ -19,10 +19,16 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-export default function Conversations() {
+export default function Conversations({ searchQuery }) {
   const { conversations, selectConversationIndex } = useConversations()
 
-  if (conversations.length === 0) {
+  const filteredConversations = conversations.filter(conversation => {
+      if (!searchQuery) return true
+      const name = conversation.recipients.map(r => r.name).join(', ').toLowerCase()
+      return name.includes(searchQuery.toLowerCase())
+  })
+
+  if (filteredConversations.length === 0) {
     return (
       <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }} className="animate-fade-in-scale">
         <div style={{ marginBottom: '12px' }}>
@@ -30,19 +36,35 @@ export default function Conversations() {
             <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM20 16H5.17L4 17.17V4H20V16ZM7 9H17V11H7V9ZM7 12H15V14H7V12ZM7 6H17V8H7V6Z" />
           </svg>
         </div>
-        <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>No messages yet</p>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          Click <strong style={{ color: 'var(--primary-dark)' }}>+ New Conversation</strong> to start chatting.
-        </p>
+        <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>No messages found</p>
       </div>
     )
   }
 
   return (
     <div>
-      {conversations.map((conversation, index) => {
-        const name = conversation.recipients.map(r => r.name).join(', ')
+      {filteredConversations.map((conversation) => {
+        const index = conversations.indexOf(conversation)
+        const name = conversation.groupName || conversation.recipients.map(r => r.name).join(', ')
         const { lastMessage, unread, isTyping, isOnline, recipientLastSeen, selected } = conversation
+
+        let lastMessageText = 'No messages yet'
+        if (isTyping) lastMessageText = 'typing...'
+        else if (lastMessage) {
+            if (lastMessage.deleted) {
+                lastMessageText = 'This message was deleted'
+            } else if (lastMessage.mediaType) {
+                const mediaPrefix = lastMessage.mediaType === 'image' ? '📷 Photo' : lastMessage.mediaType === 'video' ? '🎥 Video' : lastMessage.mediaType === 'audio' ? '🎤 Voice note' : '📄 Document'
+                lastMessageText = lastMessage.text ? `${mediaPrefix} - ${lastMessage.text}` : mediaPrefix
+                if (lastMessage.fromMe) lastMessageText = `You: ${lastMessageText}`
+            } else {
+                lastMessageText = lastMessage.fromMe ? `You: ${lastMessage.text}` : lastMessage.text
+            }
+        } else if (isOnline) {
+            lastMessageText = 'Online'
+        } else if (recipientLastSeen) {
+            lastMessageText = `Last seen ${formatLastSeen(recipientLastSeen)}`
+        }
 
         return (
           <div
@@ -100,18 +122,9 @@ export default function Conversations() {
                   fontSize: '0.82rem',
                   color: isTyping ? 'var(--primary-color)' : 'var(--text-muted)',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  fontStyle: isTyping ? 'italic' : 'normal'
+                  fontStyle: isTyping ? 'italic' : (lastMessage && lastMessage.deleted ? 'italic' : 'normal')
                 }}>
-                  {isTyping
-                    ? 'typing...'
-                    : lastMessage
-                      ? (lastMessage.fromMe ? `You: ${lastMessage.text}` : lastMessage.text)
-                      : isOnline
-                        ? 'Online'
-                        : recipientLastSeen
-                          ? `Last seen ${formatLastSeen(recipientLastSeen)}`
-                          : 'No messages yet'
-                  }
+                    {lastMessageText}
                 </span>
                 {unread > 0 && (
                   <div style={{

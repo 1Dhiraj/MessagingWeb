@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import Sidebar from './Sidebar';
 import OpenConversation from './OpenConversation';
 import { useConversations } from '../contexts/ConversationsProvider';
+import VideoCall from './VideoCall';
 
 export default function Dashboard({ id }) {
   const { selectedConversation } = useConversations()
@@ -57,6 +58,7 @@ export default function Dashboard({ id }) {
         overflow: 'hidden'
       }}
     >
+      <VideoCall />
       {/* Sidebar panel */}
       <div
         className="sidebar-panel"

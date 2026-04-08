@@ -5,22 +5,22 @@ import { useConversations } from '../contexts/ConversationsProvider'
 
 export default function NewConversationModal({ closeModal }) {
   const [selectedContactIds, setSelectedContactIds] = useState([])
+  const [groupName, setGroupName] = useState('')
   const { contacts } = useContacts()
   const { createConversation } = useConversations()
 
   function handleSubmit(e) {
     e.preventDefault()
 
-    createConversation(selectedContactIds)
+    // Pass groupName if more than 1 person is selected
+    createConversation(selectedContactIds, selectedContactIds.length > 1 ? groupName : null)
     closeModal()
   }
 
   function handleCheckboxChange(contactId) {
     setSelectedContactIds(prevSelectedContactIds => {
       if (prevSelectedContactIds.includes(contactId)) {
-        return prevSelectedContactIds.filter(prevId => {
-          return contactId !== prevId
-        })
+        return prevSelectedContactIds.filter(prevId => prevId !== contactId)
       } else {
         return [...prevSelectedContactIds, contactId]
       }
@@ -34,10 +34,25 @@ export default function NewConversationModal({ closeModal }) {
       </Modal.Header>
       <Modal.Body className="px-4 pb-4">
         <p className="text-muted small mb-4">
-          Select one or more contacts to start a new conversation. If you don't see anyone, add a new contact first.
+          Select one or more contacts to start a new conversation.
         </p>
         <Form onSubmit={handleSubmit}>
-          {contacts.map(contact => (
+          
+          {selectedContactIds.length > 1 && (
+            <Form.Group className="mb-3">
+              <Form.Label>Group Name</Form.Label>
+              <Form.Control
+                type="text"
+                required
+                value={groupName}
+                onChange={e => setGroupName(e.target.value)}
+                placeholder="Enter a catchy name for the group"
+              />
+            </Form.Group>
+          )}
+
+          <div style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '15px' }}>
+            {contacts.map(contact => (
             <Form.Group controlId={contact.id} key={contact.id} className="mb-2">
               <Form.Check
                 type="checkbox"
@@ -47,6 +62,7 @@ export default function NewConversationModal({ closeModal }) {
               />
             </Form.Group>
           ))}
+          </div>
           <Button type="submit">Create</Button>
         </Form>
       </Modal.Body>
