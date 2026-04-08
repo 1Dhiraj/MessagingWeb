@@ -43,10 +43,15 @@ export default function Sidebar({ id, onCloseSidebar }) {
               <button 
                 onClick={() => {
                    if (window.confirm('Are you sure you want to log out?')) {
-                       localStorage.removeItem('whatsapp-clone-id')
+                       const keys = Object.keys(localStorage)
+                       for (let key of keys) {
+                           if (key.startsWith('whatsapp-clone-')) {
+                               localStorage.removeItem(key)
+                           }
+                       }
                        window.location.reload()
                    }
-                }} 
+                }}  
                 title="Log out" 
                 style={{
                   background: 'none', border: 'none', padding: '6px', cursor: 'pointer',
