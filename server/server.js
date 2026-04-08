@@ -32,7 +32,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     const result = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
-        { resource_type: rType, folder: 'whatsapp-clone' },
+        { resource_type: 'auto', folder: 'whatsapp-clone' },
         (err, result) => { if (err) reject(err); else resolve(result) }
       )
       stream.end(req.file.buffer)

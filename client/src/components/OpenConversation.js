@@ -86,6 +86,7 @@ export default function OpenConversation({ onBack }) {
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const recordIntervalRef = useRef(null)
+  const isRecordingIntentRef = useRef(false)
 
   const [contextMenu, setContextMenu] = useState(null)
   const [editingMessage, setEditingMessage] = useState(null)
@@ -195,7 +196,12 @@ export default function OpenConversation({ onBack }) {
 
   const startRecording = async () => {
     try {
+      isRecordingIntentRef.current = true
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!isRecordingIntentRef.current) {
+         stream.getTracks().forEach(t => t.stop())
+         return
+      }
       mediaRecorderRef.current = new MediaRecorder(stream)
       audioChunksRef.current = []
 
@@ -204,6 +210,7 @@ export default function OpenConversation({ onBack }) {
       }
 
       mediaRecorderRef.current.onstop = async () => {
+        if (audioChunksRef.current.length === 0) return;
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
         const file = new File([blob], 'voice-note.webm', { type: 'audio/webm' })
         setUploadingMedia(true)
@@ -230,7 +237,8 @@ export default function OpenConversation({ onBack }) {
   }
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
+    isRecordingIntentRef.current = false
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop()
       setRecording(false)
       clearInterval(recordIntervalRef.current)
