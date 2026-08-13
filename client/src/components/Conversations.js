@@ -24,8 +24,11 @@ export default function Conversations({ searchQuery }) {
 
   const filteredConversations = conversations.filter(conversation => {
       if (!searchQuery) return true
-      const name = conversation.recipients.map(r => r.name).join(', ').toLowerCase()
-      return name.includes(searchQuery.toLowerCase())
+      const q = searchQuery.toLowerCase()
+      const name = (conversation.groupName || conversation.recipients.map(r => r.name).join(', ')).toLowerCase()
+      // Also match on message text, so search finds a chat by what was said.
+      const inMessages = conversation.messages.some(m => m.text && m.text.toLowerCase().includes(q))
+      return name.includes(q) || inMessages
   })
 
   if (filteredConversations.length === 0) {
@@ -69,6 +72,10 @@ export default function Conversations({ searchQuery }) {
         return (
           <div
             key={index}
+            data-testid="conversation-item"
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectConversationIndex(index) } }}
             onClick={() => selectConversationIndex(index)}
             style={{
               display: 'flex',

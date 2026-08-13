@@ -1,9 +1,24 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Form, Button } from 'react-bootstrap'
 import { useConversations } from '../contexts/ConversationsProvider'
 import EmojiPickerPanel from './EmojiPickerPanel'
 import MediaPreview from './MediaPreview'
+import VoiceNotePlayer from './VoiceNotePlayer'
+import useVoiceRecorder from '../hooks/useVoiceRecorder'
 import { useCall } from '../contexts/CallProvider'
+
+const MENU_WIDTH = 170
+const MENU_HEIGHT = 220
+
+// Short label for a message that has no text of its own (quoted replies,
+// the reply composer bar).
+function describeMedia(m) {
+  if (!m || !m.mediaType) return null
+  if (m.mediaType === 'audio') return '🎤 Voice note'
+  if (m.mediaType === 'image') return '📷 Photo'
+  if (m.mediaType === 'video') return '🎥 Video'
+  return `📄 ${m.mediaName || 'Document'}`
+}
 
 const WALLPAPERS = [
   { id: 'none',    label: 'Default',  value: null },
@@ -34,34 +49,50 @@ function ReadTick({ status }) {
 
 function ContextMenu({ x, y, message, fromMe, onClose, onReply, onEdit, onDelete, onDeleteEveryone, onReact }) {
   useEffect(() => {
-    function handleClickClick() { onClose() }
-    document.addEventListener('click', handleClickClick)
-    return () => document.removeEventListener('click', handleClickClick)
+    function handleDismiss() { onClose() }
+    function handleKey(e) { if (e.key === 'Escape') onClose() }
+    document.addEventListener('click', handleDismiss)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('click', handleDismiss)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [onClose])
 
   const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 
+  // Keep the menu on screen — near the right or bottom edge (and on narrow
+  // phone viewports) the un-clamped version rendered partly off-screen.
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 768
+  const left = Math.max(8, Math.min(x, vw - MENU_WIDTH - 8))
+  const top = Math.max(8, Math.min(y, vh - MENU_HEIGHT - 8))
+
   return (
-    <div style={{
-      position: 'fixed', left: x, top: y, zIndex: 1000,
+    <div data-testid="context-menu" style={{
+      position: 'fixed', left, top, zIndex: 1000,
       backgroundColor: 'var(--modal-bg)', border: '1px solid var(--border-color)',
       borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-      padding: '4px 0', minWidth: '150px'
+      padding: '4px 0', width: `${MENU_WIDTH}px`
     }} onClick={e => e.stopPropagation()}>
       <div style={{ display: 'flex', padding: '6px 8px', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)' }}>
         {emojis.map(e => (
-          <span key={e} onClick={() => { onReact(message.id, e); onClose() }} style={{ cursor: 'pointer', fontSize: '1.2rem', padding: '0 2px' }}>
+          <span key={e} role="button" aria-label={`React ${e}`} data-testid={`react-${e}`}
+            onClick={() => { onReact(message.id, e); onClose() }}
+            style={{ cursor: 'pointer', fontSize: '1.2rem', padding: '0 2px' }}>
             {e}
           </span>
         ))}
       </div>
-      <div onClick={() => { onReply(message); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem' }} className="menu-item hover-bg">Reply</div>
-      {fromMe && !message.mediaUrl && (
-        <div onClick={() => { onEdit(message); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem' }} className="menu-item hover-bg">Edit message</div>
+      {!message.deleted && (
+        <div data-testid="menu-reply" onClick={() => { onReply(message); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem' }} className="menu-item hover-bg">Reply</div>
       )}
-      <div onClick={() => { onDelete(message.id); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem' }} className="menu-item hover-bg">Delete for me</div>
-      {fromMe && (
-        <div onClick={() => { onDeleteEveryone(message.id); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem', color: '#f15c6d' }} className="menu-item hover-bg">Delete for everyone</div>
+      {fromMe && !message.mediaUrl && !message.deleted && (
+        <div data-testid="menu-edit" onClick={() => { onEdit(message); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem' }} className="menu-item hover-bg">Edit message</div>
+      )}
+      <div data-testid="menu-delete-me" onClick={() => { onDelete(message.id); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem' }} className="menu-item hover-bg">Delete for me</div>
+      {fromMe && !message.deleted && (
+        <div data-testid="menu-delete-all" onClick={() => { onDeleteEveryone(message.id); onClose() }} style={{ padding: '8px 16px', cursor: 'pointer', fontSize: '0.9rem', color: '#f15c6d' }} className="menu-item hover-bg">Delete for everyone</div>
       )}
     </div>
   )
@@ -80,26 +111,23 @@ export default function OpenConversation({ onBack }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [mediaFile, setMediaFile] = useState(null)
   const [uploadingMedia, setUploadingMedia] = useState(false)
-  
-  const [recording, setRecording] = useState(false)
-  const [recordTime, setRecordTime] = useState(0)
-  const mediaRecorderRef = useRef(null)
-  const audioChunksRef = useRef([])
-  const recordIntervalRef = useRef(null)
-  const isRecordingIntentRef = useRef(false)
+  const [sendError, setSendError] = useState(null)
+
+  const {
+    supported: micSupported, recording, elapsed: recordTime,
+    error: recorderError, clearError: clearRecorderError,
+    start: startRecorder, stop: stopRecorder, cancel: cancelRecorder,
+  } = useVoiceRecorder()
 
   const [contextMenu, setContextMenu] = useState(null)
   const [editingMessage, setEditingMessage] = useState(null)
 
-  const setRef = useCallback(node => {
-    if (node) node.scrollIntoView({ smooth: true })
-  }, [])
-  
   const fileInputRef = useRef()
-  const messagesEndRef = useRef(null)
+  const messagesContainerRef = useRef(null)
+  const longPressTimerRef = useRef(null)
 
-  const { 
-    sendMessage, sendMedia, selectedConversation, emitTyping, setWallpaper,
+  const {
+    sendMessage, sendMedia, selectedConversation, selectedConversationIndex, emitTyping, setWallpaper,
     deleteMessage, editMessage, addReaction, replyTo, setReplyTo, clearReplyTo, currentUserId
   } = useConversations()
 
@@ -109,13 +137,31 @@ export default function OpenConversation({ onBack }) {
   const isTyping = selectedConversation.isTyping
   const wallpaper = selectedConversation.wallpaper
 
+  const nameForId = (uid) => {
+    if (uid === currentUserId) return 'You'
+    const r = selectedConversation.recipients.find(x => x.id === uid)
+    return (r && r.name) || uid
+  }
+
+  const messages = selectedConversation.messages
+  const messageCount = messages.length
+  const lastMessageId = messageCount ? messages[messageCount - 1].id : null
+
+  // Scroll the message list itself rather than calling scrollIntoView, which
+  // on mobile scrolls the whole page and pushes the composer off screen.
+  //
+  // Keyed on the last message id and the count, not the messages array: that
+  // array is rebuilt on every render, so the old dependency re-fired on every
+  // keystroke and presence tick and yanked you back down while you were
+  // reading history.
   useEffect(() => {
-    if (messagesEndRef.current) {
-        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [selectedConversation.messages, showSearch])
+    const el = messagesContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [lastMessageId, messageCount, selectedConversationIndex, showSearch])
 
   useEffect(() => {
+      const target = observerTarget.current
+      if (!target || typeof IntersectionObserver === 'undefined') return
       const observer = new IntersectionObserver(
           entries => {
               if (entries[0].isIntersecting) {
@@ -124,19 +170,26 @@ export default function OpenConversation({ onBack }) {
           },
           { threshold: 1.0 }
       )
-      if (observerTarget.current) {
-          observer.observe(observerTarget.current)
-      }
-      return () => {
-          if (observerTarget.current) {
-              observer.unobserve(observerTarget.current) // eslint-disable-line
-          }
-      }
-  }, [observerTarget])
+      observer.observe(target)
+      return () => observer.disconnect()
+  }, [])
 
-  const filteredMessages = selectedConversation.messages.filter(m => {
+  // Reset the paging window when switching chats so a long history doesn't
+  // stay expanded into the next conversation.
+  useEffect(() => {
+    setVisibleMessagesCount(30)
+    setSearchQuery('')
+    setShowSearch(false)
+    setEditingMessage(null)
+    setText('')
+  }, [selectedConversationIndex])
+
+  const filteredMessages = messages.filter(m => {
     if (!searchQuery) return true
-    return m.text && m.text.toLowerCase().includes(searchQuery.toLowerCase())
+    const q = searchQuery.toLowerCase()
+    // Match captions and attachment names too, not just plain text messages.
+    return (m.text && m.text.toLowerCase().includes(q)) ||
+           (m.mediaName && m.mediaName.toLowerCase().includes(q))
   }).slice(-visibleMessagesCount)
 
   function handleSubmit(e) {
@@ -183,93 +236,113 @@ export default function OpenConversation({ onBack }) {
 
   const handleSendMedia = async (caption) => {
     setUploadingMedia(true)
+    setSendError(null)
     try {
       await sendMedia(recipients, mediaFile, caption, replyTo)
       setMediaFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     } catch (err) {
       console.error(err)
-      alert("Failed to send media")
+      setSendError(err.message || 'Failed to send media')
     } finally {
       setUploadingMedia(false)
     }
   }
 
-  const startRecording = async () => {
-    try {
-      isRecordingIntentRef.current = true
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      if (!isRecordingIntentRef.current) {
-         stream.getTracks().forEach(t => t.stop())
-         return
-      }
-      mediaRecorderRef.current = new MediaRecorder(stream)
-      audioChunksRef.current = []
+  // ── Voice notes ───────────────────────────────────────────
+  // Tap to start, tap again to send. The original press-and-hold fired both
+  // touchstart and the synthesised mousedown on mobile, starting two
+  // recorders, and any pointer drift off the button silently aborted a
+  // recording mid-sentence.
+  // Intent is tracked in a ref, not in render state: two taps landing in the
+  // same frame would both read `recording === false` and try to start twice.
+  const recordIntentRef = useRef(false)
 
-      mediaRecorderRef.current.ondataavailable = e => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+  const handleToggleRecording = async () => {
+    if (recordIntentRef.current) {
+      recordIntentRef.current = false
+      const result = await stopRecorder()
+      if (!result) return // cancelled, or too short to be a real note
+      setUploadingMedia(true)
+      setSendError(null)
+      try {
+        await sendMedia(recipients, result.file, '', replyTo, { duration: result.duration })
+        clearReplyTo()
+      } catch (err) {
+        console.error(err)
+        setSendError(err.message || 'Failed to send voice note')
+      } finally {
+        setUploadingMedia(false)
       }
-
-      mediaRecorderRef.current.onstop = async () => {
-        if (audioChunksRef.current.length === 0) return;
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        const file = new File([blob], 'voice-note.webm', { type: 'audio/webm' })
-        setUploadingMedia(true)
-        try {
-            await sendMedia(recipients, file, '', replyTo)
-        } catch(e) {
-            console.error(e)
-        } finally {
-            setUploadingMedia(false)
-        }
-        stream.getTracks().forEach(track => track.stop())
-      }
-
-      mediaRecorderRef.current.start()
-      setRecording(true)
-      setRecordTime(0)
-      recordIntervalRef.current = setInterval(() => {
-        setRecordTime(prev => prev + 1)
-      }, 1000)
-    } catch (err) {
-      console.error('Mic access denied', err)
-      alert('Microphone access is required to send voice notes.')
+      return
     }
+
+    recordIntentRef.current = true
+    clearRecorderError()
+    const started = await startRecorder()
+    if (!started) recordIntentRef.current = false
   }
 
-  const stopRecording = () => {
-    isRecordingIntentRef.current = false
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop()
-      setRecording(false)
-      clearInterval(recordIntervalRef.current)
-    }
+  const handleCancelRecording = async () => {
+    recordIntentRef.current = false
+    await cancelRecorder()
   }
 
   const formatRecordTime = (seconds) => {
-    const m = Math.floor(seconds / 60)
-    const s = seconds % 60
+    const total = Math.floor(seconds || 0)
+    const m = Math.floor(total / 60)
+    const s = total % 60
     return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  const openContextMenu = (clientX, clientY, message, fromMe) => {
+    setContextMenu({ x: clientX, y: clientY, message, fromMe })
   }
 
   const handleContextMenu = (e, message, fromMe) => {
     e.preventDefault()
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      message,
-      fromMe
-    })
+    openContextMenu(e.clientX, e.clientY, message, fromMe)
   }
+
+  // Touch devices have no right-click, so long-press opens the same menu.
+  const handleTouchStart = (e, message, fromMe) => {
+    const touch = e.touches[0]
+    if (!touch) return
+    const { clientX, clientY } = touch
+    clearTimeout(longPressTimerRef.current)
+    longPressTimerRef.current = setTimeout(() => {
+      openContextMenu(clientX, clientY, message, fromMe)
+    }, 500)
+  }
+  const cancelLongPress = () => clearTimeout(longPressTimerRef.current)
+  useEffect(() => () => clearTimeout(longPressTimerRef.current), [])
 
   const renderMedia = (message) => {
     if (!message.mediaUrl) return null
-    if (message.mediaType === 'image') return <img src={message.mediaUrl} alt="attachment" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px', cursor: 'pointer' }} onClick={()=>window.open(message.mediaUrl, '_blank')} />
-    if (message.mediaType === 'video') return <video src={message.mediaUrl} controls style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} />
-    if (message.mediaType === 'audio') return <audio src={message.mediaUrl} controls style={{ maxWidth: '250px' }} />
+    if (message.mediaType === 'image') {
+      return (
+        <img src={message.mediaUrl} alt={message.mediaName || 'attachment'}
+          data-testid="media-image"
+          style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px', cursor: 'pointer', display: 'block' }}
+          onClick={() => window.open(message.mediaUrl, '_blank', 'noopener,noreferrer')} />
+      )
+    }
+    if (message.mediaType === 'video') {
+      return <video src={message.mediaUrl} controls data-testid="media-video" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px', display: 'block' }} />
+    }
+    if (message.mediaType === 'audio') {
+      return (
+        <VoiceNotePlayer
+          src={message.mediaUrl}
+          duration={message.mediaDuration}
+          fromMe={message.fromMe}
+        />
+      )
+    }
     return (
       <div style={{ display: 'flex', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.05)', padding: '8px', borderRadius: '8px' }}>
-        <span style={{ fontSize: '24px', marginRight: '8px' }}>📄</span>
-        <a href={message.mediaUrl} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all', fontSize: '0.85rem' }}>
+        <span style={{ fontSize: '24px', marginRight: '8px' }} role="img" aria-label="document">📄</span>
+        <a href={message.mediaUrl} target="_blank" rel="noopener noreferrer" data-testid="media-document" style={{ wordBreak: 'break-all', fontSize: '0.85rem' }}>
           {message.mediaName || 'Document'}
         </a>
       </div>
@@ -423,13 +496,19 @@ export default function OpenConversation({ onBack }) {
 
       {/* ── Messages Area ── */}
       <div
+        ref={messagesContainerRef}
+        data-testid="messages-container"
         onClick={() => setShowWallpaperPicker(false)}
         style={{
           flex: 1, overflowY: 'auto', padding: '12px 16px',
-          background: wallpaper || 'var(--chat-bg)',
-          backgroundImage: !wallpaper ? 'var(--chat-pattern)' : undefined,
-          backgroundSize: !wallpaper ? '400px' : undefined,
-          backgroundRepeat: !wallpaper ? 'repeat' : undefined,
+          // All longhand on purpose. Setting the `background` shorthand and
+          // then `backgroundImage: undefined` made React clear the image it
+          // had just set, so picking a wallpaper appeared to do nothing.
+          backgroundColor: 'var(--chat-bg)',
+          backgroundImage: wallpaper || 'var(--chat-pattern)',
+          backgroundSize: wallpaper ? 'cover' : '400px',
+          backgroundRepeat: wallpaper ? 'no-repeat' : 'repeat',
+          backgroundAttachment: 'local',
         }}
         className="custom-scrollbar"
       >
@@ -440,15 +519,21 @@ export default function OpenConversation({ onBack }) {
             
             return (
               <div
-                ref={lastMessage ? setRef : null}
                 key={message.id || index}
+                data-testid="message-row"
+                data-last={lastMessage ? 'true' : 'false'}
                 style={{
                   display: 'flex',
                   justifyContent: message.fromMe ? 'flex-end' : 'flex-start'
                 }}
               >
-                <div 
+                <div
+                  data-testid="message-bubble"
                   onContextMenu={(e) => handleContextMenu(e, message, message.fromMe)}
+                  onTouchStart={(e) => handleTouchStart(e, message, message.fromMe)}
+                  onTouchEnd={cancelLongPress}
+                  onTouchMove={cancelLongPress}
+                  onTouchCancel={cancelLongPress}
                   style={{
                   maxWidth: '72%',
                   backgroundColor: message.fromMe ? 'var(--bubble-out)' : 'var(--bubble-in)',
@@ -467,12 +552,12 @@ export default function OpenConversation({ onBack }) {
                   )}
                   
                   {message.deleted ? (
-                      <span style={{ fontSize: '0.93rem', color: 'var(--text-muted)' }}>This message was deleted</span>
+                      <span data-testid="deleted-message" style={{ fontSize: '0.93rem', color: 'var(--text-muted)' }}>This message was deleted</span>
                   ) : (
                       <>
                         {message.replyTo && (
-                            <div style={{ 
-                                backgroundColor: 'rgba(0,0,0,0.05)', 
+                            <div data-testid="reply-quote" style={{
+                                backgroundColor: 'rgba(0,0,0,0.05)',
                                 borderLeft: '3px solid var(--primary-color)',
                                 padding: '4px 8px',
                                 borderRadius: '4px',
@@ -480,19 +565,24 @@ export default function OpenConversation({ onBack }) {
                                 fontSize: '0.8rem',
                                 color: 'var(--text-secondary)'
                             }}>
-                                <div style={{ fontWeight: 'bold' }}>{message.replyTo.fromMe ? 'You' : message.replyTo.senderName}</div>
+                                <div style={{ fontWeight: 'bold' }}>{nameForId(message.replyTo.sender)}</div>
                                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {message.replyTo.deleted ? 'Deleted message' : (message.replyTo.text || message.replyTo.mediaName || 'Media')}
+                                    {message.replyTo.deleted ? 'Deleted message' : (message.replyTo.text || describeMedia(message.replyTo) || 'Media')}
                                 </div>
                             </div>
                         )}
                         {renderMedia(message)}
-                        <span style={{ fontSize: '0.93rem', color: 'var(--bubble-text)', lineHeight: '1.4' }}>
-                          {message.text}
-                          {message.edited && (
-                              <span style={{ fontSize: '0.65rem', fontStyle: 'italic', color: 'var(--text-muted)', marginLeft: '6px' }}>(edited)</span>
-                          )}
-                        </span>
+                        {(message.text || message.edited) && (
+                          <span data-testid="message-text" style={{
+                            fontSize: '0.93rem', color: 'var(--bubble-text)', lineHeight: '1.4',
+                            display: 'block', marginTop: message.mediaUrl ? '4px' : 0
+                          }}>
+                            {message.text}
+                            {message.edited && (
+                                <span style={{ fontSize: '0.65rem', fontStyle: 'italic', color: 'var(--text-muted)', marginLeft: '6px' }}>(edited)</span>
+                            )}
+                          </span>
+                        )}
                       </>
                   )}
                   
@@ -529,7 +619,6 @@ export default function OpenConversation({ onBack }) {
               </div>
             )
           })}
-          <div ref={messagesEndRef} />
         </div>
       </div>
       
@@ -559,23 +648,39 @@ export default function OpenConversation({ onBack }) {
       )}
 
       {replyTo && (
-          <div style={{
+          <div data-testid="reply-bar" style={{
               padding: '8px 16px',
               backgroundColor: 'var(--header-bg)',
               borderTop: '1px solid var(--border-color)',
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center'
+              alignItems: 'center',
+              gap: '12px'
           }}>
-              <div>
+              <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--primary-dark)' }}>
                       Replying to {replyTo.fromMe ? 'yourself' : replyTo.senderName}
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '300px' }}>
-                      {replyTo.deleted ? 'Deleted message' : (replyTo.text || replyTo.mediaName || 'Media')}
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {replyTo.deleted ? 'Deleted message' : (replyTo.text || describeMedia(replyTo) || 'Media')}
                   </div>
               </div>
-              <button onClick={clearReplyTo} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+              <button onClick={clearReplyTo} aria-label="Cancel reply" data-testid="cancel-reply" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', flexShrink: 0 }}>✕</button>
+          </div>
+      )}
+
+      {uploadingMedia && !mediaFile && (
+          <div data-testid="uploading-bar" style={{
+              padding: '6px 16px', backgroundColor: 'var(--header-bg)',
+              borderTop: '1px solid var(--border-color)', fontSize: '0.8rem',
+              color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px'
+          }}>
+              <span style={{
+                width: '12px', height: '12px', border: '2px solid var(--primary-color)',
+                borderTopColor: 'transparent', borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite', display: 'inline-block'
+              }} />
+              Sending voice note…
           </div>
       )}
 
@@ -600,79 +705,138 @@ export default function OpenConversation({ onBack }) {
             accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
         />
 
+        {(recorderError || sendError) && (
+            <div data-testid="composer-error" role="alert" style={{
+                backgroundColor: 'rgba(241,92,109,0.12)', color: '#c93448',
+                border: '1px solid rgba(241,92,109,0.35)', borderRadius: '8px',
+                padding: '6px 10px', fontSize: '0.8rem', marginBottom: '8px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px'
+            }}>
+                <span>{recorderError || sendError}</span>
+                <button onClick={() => { clearRecorderError(); setSendError(null) }} aria-label="Dismiss error" style={{
+                    background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, flexShrink: 0
+                }}>✕</button>
+            </div>
+        )}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button type="button" onClick={() => setShowEmojiPicker(p => !p)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: 'var(--text-muted)' }}>
-                😀
+            <button type="button" aria-label="Emoji picker" data-testid="emoji-btn" disabled={recording}
+                onClick={() => setShowEmojiPicker(p => !p)}
+                style={{ background: 'none', border: 'none', cursor: recording ? 'not-allowed' : 'pointer', padding: '4px', color: 'var(--text-muted)', opacity: recording ? 0.4 : 1, fontSize: '1.15rem' }}>
+                <span role="img" aria-hidden="true">😀</span>
             </button>
-            <button type="button" onClick={() => fileInputRef.current.click()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: 'var(--text-muted)' }}>
-                📎
+            <button type="button" aria-label="Attach file" data-testid="attach-btn" disabled={recording}
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                style={{ background: 'none', border: 'none', cursor: recording ? 'not-allowed' : 'pointer', padding: '4px', color: 'var(--text-muted)', opacity: recording ? 0.4 : 1, fontSize: '1.15rem' }}>
+                <span role="img" aria-hidden="true">📎</span>
             </button>
 
             {recording ? (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', backgroundColor: 'var(--input-bg)', borderRadius: '22px', padding: '10px 18px', color: '#f15c6d', fontWeight: 'bold' }}>
-                    <span style={{ marginRight: '10px', animation: 'blink 1s infinite', letterSpacing: '2px' }}>၊၊||၊</span> 
-                    {formatRecordTime(recordTime)}
-                </div>
+                <>
+                  {/* Discard the take instead of sending it */}
+                  <button type="button" onClick={handleCancelRecording}
+                    aria-label="Cancel recording" data-testid="cancel-recording"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: '6px',
+                      color: '#f15c6d', display: 'flex', alignItems: 'center', flexShrink: 0
+                    }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                    </svg>
+                  </button>
+                  <div data-testid="recording-indicator" style={{
+                    flex: 1, display: 'flex', alignItems: 'center', backgroundColor: 'var(--input-bg)',
+                    borderRadius: '22px', padding: '10px 18px', color: '#f15c6d', fontWeight: 'bold',
+                    minWidth: 0
+                  }}>
+                    <span aria-hidden="true" style={{
+                      width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#f15c6d',
+                      marginRight: '10px', animation: 'blink 1s infinite', flexShrink: 0
+                    }} />
+                    <span data-testid="record-timer">{formatRecordTime(recordTime)}</span>
+                    <span style={{ marginLeft: '10px', fontWeight: 400, fontSize: '0.8rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      Recording… tap send to finish
+                    </span>
+                  </div>
+                </>
             ) : (
                 <Form.Control
                     as="textarea"
                     value={text}
                     onChange={handleTextChange}
                     placeholder="Type a message"
+                    aria-label="Message"
+                    data-testid="message-input"
+                    disabled={uploadingMedia}
                     style={{
                         height: '44px', resize: 'none', borderRadius: '22px',
                         padding: '10px 18px', border: 'none', boxShadow: 'none',
                         fontSize: '0.95rem', backgroundColor: 'var(--input-bg)',
-                        color: 'var(--text-primary)', flex: 1
+                        color: 'var(--text-primary)', flex: 1, minWidth: 0
                     }}
                     onKeyDown={e => {
                         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e) }
                     }}
                 />
             )}
-            
-            {text.trim() ? (
-                <Button onClick={handleSubmit} style={{
+
+            {text.trim() && !recording ? (
+                <Button onClick={handleSubmit} data-testid="send-btn" aria-label={editingMessage ? 'Save edit' : 'Send message'} style={{
                     width: '44px', height: '44px', minWidth: '44px', borderRadius: '50%',
                     backgroundColor: 'var(--primary-dark)', border: 'none',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     padding: 0, flexShrink: 0
                 }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style={{ marginLeft: '2px' }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true" style={{ marginLeft: '2px' }}>
                     <path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"/>
                     </svg>
                 </Button>
             ) : (
-                <Button 
-                    onMouseDown={startRecording}
-                    onMouseUp={stopRecording}
-                    onMouseLeave={stopRecording}
-                    onTouchStart={startRecording}
-                    onTouchEnd={stopRecording}
+                <Button
+                    type="button"
+                    onClick={handleToggleRecording}
+                    disabled={!micSupported || uploadingMedia}
+                    data-testid="record-btn"
+                    aria-label={recording ? 'Send voice note' : 'Record voice note'}
+                    title={micSupported ? (recording ? 'Send voice note' : 'Record voice note') : 'Recording not supported in this browser'}
                     style={{
                     width: '44px', height: '44px', minWidth: '44px', borderRadius: '50%',
                     backgroundColor: recording ? '#f15c6d' : 'var(--primary-dark)', border: 'none',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: 0, flexShrink: 0, cursor: 'pointer', transition: 'background 0.2s',
-                    color: 'white', fontWeight: 'bold'
+                    padding: 0, flexShrink: 0, cursor: micSupported ? 'pointer' : 'not-allowed',
+                    transition: 'background 0.2s', color: 'white',
+                    opacity: micSupported ? 1 : 0.5,
+                    // Suppress the synthetic mouse events + long-press callout
+                    // that mobile browsers fire after a tap.
+                    touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent'
                 }}>
-                    <span style={{ letterSpacing: '1px' }}>၊၊||၊</span>
+                    {recording ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true" style={{ marginLeft: '2px' }}>
+                        <path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"/>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                      </svg>
+                    )}
                 </Button>
             )}
           </div>
       </div>
 
       {mediaFile && (
-          <MediaPreview 
-            file={mediaFile} 
+          <MediaPreview
+            file={mediaFile}
             uploading={uploadingMedia}
-            onSend={handleSendMedia} 
+            error={sendError}
+            onSend={handleSendMedia}
             onCancel={() => {
-                if(!uploadingMedia){
-                   setMediaFile(null); 
-                   fileInputRef.current.value = null; 
+                if (!uploadingMedia) {
+                   setMediaFile(null)
+                   setSendError(null)
+                   if (fileInputRef.current) fileInputRef.current.value = ''
                 }
-            }} 
+            }}
           />
       )}
 
@@ -698,7 +862,7 @@ export default function OpenConversation({ onBack }) {
           .mobile-back-btn { display: flex !important; }
         }
         @keyframes blink {
-            50% { opacity: 0.5; }
+            50% { opacity: 0.25; }
         }
         .menu-item:hover {
             background-color: var(--hover-bg);

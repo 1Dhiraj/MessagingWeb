@@ -32,6 +32,18 @@
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
+    <script>
+      // Load the webfont only after the page has finished loading, so a slow or
+      // unreachable font CDN can never delay first paint or the load event.
+      // index.css falls back to the system stack until (and unless) it lands.
+      window.addEventListener('load', function () {
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap';
+        link.crossOrigin = 'anonymous';
+        document.head.appendChild(link);
+      });
+    </script>
     <!--
       This HTML file is a template.
       If you open it directly in the browser, you will see an empty page.

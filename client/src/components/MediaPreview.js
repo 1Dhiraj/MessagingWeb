@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 
-export default function MediaPreview({ file, onSend, onCancel, uploading }) {
+export default function MediaPreview({ file, onSend, onCancel, uploading, error }) {
   const [previewUrl, setPreviewUrl] = useState(null)
   const [caption, setCaption] = useState('')
 
@@ -10,6 +10,13 @@ export default function MediaPreview({ file, onSend, onCancel, uploading }) {
     setPreviewUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [file])
+
+  // Escape closes the overlay, matching every other modal in the app.
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape' && !uploading) onCancel() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onCancel, uploading])
 
   if (!file) return null
 
@@ -29,6 +36,9 @@ export default function MediaPreview({ file, onSend, onCancel, uploading }) {
       {/* Close */}
       <button
         onClick={onCancel}
+        disabled={uploading}
+        aria-label="Cancel"
+        data-testid="preview-cancel"
         style={{
           position: 'absolute', top: '16px', right: '16px',
           background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '50%',
@@ -54,18 +64,29 @@ export default function MediaPreview({ file, onSend, onCancel, uploading }) {
         )}
         {isAudio && (
           <div style={{ textAlign: 'center', color: 'white' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🎵</div>
+            <div style={{ fontSize: '3rem', marginBottom: '12px' }}><span role="img" aria-label="audio file">🎵</span></div>
             <audio src={previewUrl} controls />
           </div>
         )}
         {!isImage && !isVideo && !isAudio && (
           <div style={{ textAlign: 'center', color: 'white' }}>
-            <div style={{ fontSize: '5rem', marginBottom: '16px' }}>📄</div>
+            <div style={{ fontSize: '5rem', marginBottom: '16px' }}><span role="img" aria-label="document">📄</span></div>
             <div style={{ fontSize: '1rem', fontWeight: '600' }}>{file.name}</div>
             <div style={{ fontSize: '0.8rem', opacity: 0.6, marginTop: '4px' }}>{sizeMb} MB</div>
           </div>
         )}
       </div>
+
+      {error && (
+        <div data-testid="preview-error" role="alert" style={{
+          color: '#ffb3bd', backgroundColor: 'rgba(241,92,109,0.15)',
+          border: '1px solid rgba(241,92,109,0.4)', borderRadius: '8px',
+          padding: '8px 14px', marginBottom: '12px', fontSize: '0.85rem',
+          maxWidth: '90vw', textAlign: 'center',
+        }}>
+          {error}
+        </div>
+      )}
 
       {/* Caption + Send */}
       <div style={{ display: 'flex', gap: '8px', width: '100%', maxWidth: '480px', padding: '0 16px' }}>
@@ -73,10 +94,12 @@ export default function MediaPreview({ file, onSend, onCancel, uploading }) {
           value={caption}
           onChange={e => setCaption(e.target.value)}
           placeholder="Add a caption… (optional)"
+          aria-label="Caption"
+          data-testid="caption-input"
           onKeyDown={e => { if (e.key === 'Enter' && !uploading) onSend(caption) }}
           disabled={uploading}
           style={{
-            flex: 1, padding: '11px 16px', borderRadius: '24px',
+            flex: 1, minWidth: 0, padding: '11px 16px', borderRadius: '24px',
             border: 'none', backgroundColor: 'rgba(255,255,255,0.14)',
             color: 'white', fontSize: '0.95rem', outline: 'none',
           }}
@@ -84,6 +107,8 @@ export default function MediaPreview({ file, onSend, onCancel, uploading }) {
         <button
           onClick={() => onSend(caption)}
           disabled={uploading}
+          aria-label="Send media"
+          data-testid="preview-send"
           style={{
             width: '46px', height: '46px', borderRadius: '50%',
             backgroundColor: uploading ? '#555' : '#25D366',

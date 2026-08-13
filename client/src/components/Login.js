@@ -8,7 +8,10 @@ export default function Login({ onIdSubmit }) {
   function handleSubmit(e) {
     e.preventDefault()
 
-    onIdSubmit(idRef.current.value)
+    // Trim: a stray space produced a distinct ID that no contact could match.
+    const value = idRef.current.value.trim()
+    if (!value) return
+    onIdSubmit(value)
   }
 
   function createNewId() {
@@ -35,6 +38,8 @@ export default function Login({ onIdSubmit }) {
               type="text"
               ref={idRef}
               placeholder="Enter your ID"
+              aria-label="Your ID"
+              data-testid="login-id-input"
               required
               style={{
                 padding: '12px 16px',
@@ -45,10 +50,10 @@ export default function Login({ onIdSubmit }) {
               }}
             />
           </Form.Group>
-          <Button type="submit" className="w-100 mb-3 rounded" style={{ padding: '12px', background: 'var(--primary-color)', border: 'none', fontWeight: '600', boxShadow: '0 6px 12px rgba(37, 211, 102, 0.3)', transition: 'transform 0.2s, box-shadow 0.2s' }} onMouseOver={e => e.target.style.transform = 'translateY(-2px)'} onMouseOut={e => e.target.style.transform = 'translateY(0)'}>
+          <Button type="submit" data-testid="login-btn" className="w-100 mb-3 rounded" style={{ padding: '12px', background: 'var(--primary-color)', border: 'none', fontWeight: '600', boxShadow: '0 6px 12px rgba(37, 211, 102, 0.3)', transition: 'transform 0.2s, box-shadow 0.2s' }} onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'} onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}>
             Login to Account
           </Button>
-          <Button onClick={createNewId} variant="outline-secondary" className="w-100 rounded" style={{ padding: '10px', fontWeight: '500', transition: 'all 0.2s' }} onMouseOver={e => { e.target.style.background = '#f0f2f5'; e.target.style.color = '#128C7E' }} onMouseOut={e => { e.target.style.background = 'transparent'; e.target.style.color = '#6c757d' }}>
+          <Button onClick={createNewId} data-testid="create-id-btn" variant="outline-secondary" className="w-100 rounded" style={{ padding: '10px', fontWeight: '500', transition: 'all 0.2s' }} onMouseOver={e => { e.currentTarget.style.background = '#f0f2f5'; e.currentTarget.style.color = '#128C7E' }} onMouseOut={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6c757d' }}>
             Create A New ID
           </Button>
         </Form>

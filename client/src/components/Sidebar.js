@@ -29,7 +29,7 @@ export default function Sidebar({ id, onCloseSidebar }) {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               {/* Dark / Light mode toggle */}
-              <button onClick={toggleTheme} title={dark ? 'Switch to light mode' : 'Switch to dark mode'} style={{
+              <button onClick={toggleTheme} data-testid="theme-toggle" aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Switch to light mode' : 'Switch to dark mode'} style={{
                 background: 'none', border: 'none', padding: '6px', cursor: 'pointer',
                 borderRadius: '50%', color: 'var(--text-muted)', display: 'flex', alignItems: 'center'
               }}>
@@ -84,7 +84,7 @@ export default function Sidebar({ id, onCloseSidebar }) {
               const active = activeKey === key
               return (
                 <Nav.Item key={key} className="w-50">
-                  <Nav.Link eventKey={key} style={{
+                  <Nav.Link eventKey={key} data-testid={`tab-${key}`} style={{
                     textAlign: 'center', backgroundColor: 'transparent', border: 'none',
                     borderBottom: active ? '3px solid var(--primary-color)' : '3px solid transparent',
                     borderRadius: 0, transition: 'border-color 0.2s', paddingBottom: '8px',
@@ -177,7 +177,7 @@ export default function Sidebar({ id, onCloseSidebar }) {
         </div>
 
         {/* ── New button ── */}
-        <Button onClick={() => setModalOpen(true)} style={{
+        <Button onClick={() => setModalOpen(true)} data-testid="new-btn" style={{
           background: 'var(--primary-color)', border: 'none', borderRadius: 0,
           padding: '13px', fontWeight: '600', fontSize: '0.97rem', width: '100%', flexShrink: 0
         }}>

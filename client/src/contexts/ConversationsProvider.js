@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useCallback } from 'react'
+import React, { useContext, useState, useEffect, useCallback, useRef } from 'react'
 import useLocalStorage from '../hooks/useLocalStorage'
 import { useContacts } from './ContactsProvider'
 import { useSocket } from './SocketProvider'
@@ -21,6 +21,7 @@ function getConvKey(recipients) {
 export function ConversationsProvider({ id, children }) {
   const [conversations, setConversations] = useLocalStorage('conversations', [])
   const [selectedConversationIndex, setSelectedConversationIndex] = useState(-1)
+  const [selectionTick, setSelectionTick] = useState(0)
   const [unreadCounts, setUnreadCounts] = useState({})
   const [typingUsers, setTypingUsers] = useState({})
   const [onlineUsers, setOnlineUsers] = useState(new Set())
@@ -30,24 +31,44 @@ export function ConversationsProvider({ id, children }) {
   const { contacts } = useContacts()
   const socket = useSocket()
 
+  // Key of the conversation currently on screen, readable from socket handlers
+  // without making them depend on (and re-subscribe to) conversation state.
+  const activeConvKeyRef = useRef(null)
+  const socketRef = useRef(null)
+  useEffect(() => { socketRef.current = socket }, [socket])
+
+  const selectedRaw = conversations[selectedConversationIndex]
+  useEffect(() => {
+    activeConvKeyRef.current = selectedRaw ? getConvKey(selectedRaw.recipients) : null
+  })
+
   const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'https://messagingweb.onrender.com'
 
-  // ── Fix Legacy Messages ──────────────────────────────────
+  // ── Migrate legacy stored data ───────────────────────────
+  // Older builds saved messages without an id and conversations without a
+  // messages array; both crash the render path, so repair them on load.
   useEffect(() => {
-     let changed = false
-     const patched = conversations.map(c => {
-         let convChanged = false
-         const msgs = c.messages.map(m => {
-             if (!m.id) {
-                 changed = true; convChanged = true
-                 return { ...m, id: generateId() }
-             }
-             return m
-         })
-         return convChanged ? { ...c, messages: msgs } : c
+     setConversations(prev => {
+       let changed = false
+       const patched = prev.map(c => {
+           const messages = Array.isArray(c.messages) ? c.messages : []
+           if (!Array.isArray(c.messages)) changed = true
+
+           let convChanged = false
+           const msgs = messages.map(m => {
+               if (!m.id) {
+                   changed = true; convChanged = true
+                   return { ...m, id: generateId() }
+               }
+               return m
+           })
+           return convChanged || !Array.isArray(c.messages) ? { ...c, messages: msgs } : c
+       }).filter(c => Array.isArray(c.recipients) && c.recipients.length > 0)
+
+       if (patched.length !== prev.length) changed = true
+       return changed ? patched : prev
      })
-     if (changed) setConversations(patched)
-  }, []) // run once on mount
+  }, [setConversations]) // run once on mount; setConversations is stable
 
   // ── Online / offline ──────────────────────────────────────
   useEffect(() => {
@@ -148,77 +169,102 @@ export function ConversationsProvider({ id, children }) {
   }, [socket, setConversations])
 
   // ── Receive message ───────────────────────────────────────
-  const addMessageToConversation = useCallback(({ recipients, text, sender, messageId, mediaUrl, mediaType, mediaName, replyTo: replyToMsg }) => {
+  const addMessageToConversation = useCallback(({ recipients, text, sender, messageId, mediaUrl, mediaType, mediaName, mediaDuration, replyTo: replyToMsg }) => {
+    // Decrypt outside the state updater: updaters must stay pure, and React
+    // StrictMode invokes them twice (which previously double-counted unread
+    // badges and fired duplicate notifications).
+    let finalDecryptedText = text || ''
+    let finalReplyToMsg = replyToMsg
+    if (sender !== id && text) {
+        try {
+            const secretKey = [...recipients, id].sort().join(',')
+            const bytes = CryptoJS.AES.decrypt(text, secretKey)
+            const decrypted = bytes.toString(CryptoJS.enc.Utf8)
+            if (decrypted) finalDecryptedText = decrypted
+
+            if (finalReplyToMsg && finalReplyToMsg.text) {
+                const replyBytes = CryptoJS.AES.decrypt(finalReplyToMsg.text, secretKey)
+                const replyDecrypted = replyBytes.toString(CryptoJS.enc.Utf8)
+                if (replyDecrypted) finalReplyToMsg = { ...finalReplyToMsg, text: replyDecrypted }
+            }
+        } catch (e) {
+            console.error("Decryption failed", e)
+        }
+    }
+
+    const newMessage = {
+      sender,
+      text: finalDecryptedText,
+      id: messageId || generateId(),
+      status: 'sent',
+      mediaUrl: mediaUrl || null,
+      mediaType: mediaType || null,
+      mediaName: mediaName || null,
+      mediaDuration: mediaDuration || null,
+      replyTo: finalReplyToMsg || null,
+      reactions: {},
+      deleted: false,
+      timestamp: Date.now(),
+    }
+
     setConversations(prevConversations => {
-      let finalDecryptedText = text || ''
-      let finalReplyToMsg = replyToMsg
-      if (sender !== id && text) {
-          try {
-              const secretKey = [...recipients, id].sort().join(',')
-              const bytes = CryptoJS.AES.decrypt(text, secretKey)
-              const decrypted = bytes.toString(CryptoJS.enc.Utf8)
-              if (decrypted) finalDecryptedText = decrypted
-              
-              if (finalReplyToMsg && finalReplyToMsg.text) {
-                  const replyBytes = CryptoJS.AES.decrypt(finalReplyToMsg.text, secretKey)
-                  const replyDecrypted = replyBytes.toString(CryptoJS.enc.Utf8)
-                  if (replyDecrypted) finalReplyToMsg = { ...finalReplyToMsg, text: replyDecrypted }
-              }
-          } catch (e) {
-              console.error("Decryption failed", e)
-          }
+      // Ignore replays of a message we already stored (socket reconnect can
+      // redeliver, and StrictMode replays this updater).
+      if (prevConversations.some(c => c.messages.some(m => m.id === newMessage.id))) {
+        return prevConversations
       }
 
-      let targetIndex = -1
       let madeChange = false
-      const newMessage = {
-        sender,
-        text: finalDecryptedText,
-        id: messageId || generateId(),
-        status: 'sent',
-        mediaUrl: mediaUrl || null,
-        mediaType: mediaType || null,
-        mediaName: mediaName || null,
-        replyTo: finalReplyToMsg || null,
-        reactions: {},
-        deleted: false,
-        timestamp: Date.now(),
-      }
-
-      const newConversations = prevConversations.map((conversation, idx) => {
+      const newConversations = prevConversations.map(conversation => {
         if (arrayEquality(conversation.recipients, recipients)) {
-          madeChange = true; targetIndex = idx
+          madeChange = true
           return { ...conversation, messages: [...conversation.messages, newMessage] }
         }
         return conversation
       })
 
-      if (!madeChange) {
-        targetIndex = newConversations.length
-        newConversations.push({ recipients, messages: [newMessage] })
+      if (!madeChange) newConversations.push({ recipients, messages: [newMessage] })
+
+      return newConversations
+    })
+
+    if (sender !== id) {
+      // Track unread by conversation key, not array index — indexes shift when
+      // a conversation is created or removed and badges landed on the wrong row.
+      const convKey = getConvKey(recipients)
+      const isOpenOnScreen = convKey === activeConvKeyRef.current && !document.hidden
+
+      if (isOpenOnScreen) {
+        // Already reading it: don't badge, and tell the sender it was read.
+        if (socketRef.current) socketRef.current.emit('read-messages', { recipients })
+      } else {
+        setUnreadCounts(prev => ({ ...prev, [convKey]: (prev[convKey] || 0) + 1 }))
       }
 
-      if (sender !== id) {
-        setUnreadCounts(prev => ({ ...prev, [targetIndex]: (prev[targetIndex] || 0) + 1 }))
-
-        // Trigger Desktop Notification if tab is backgrounded
-        if (document.hidden && Notification.permission === 'granted') {
-           const senderName = contacts.find(c => c.id === sender)?.name || sender
-           const notifText = mediaType ? `Sent a ${mediaType}` : text
+      // Desktop notification when the tab is backgrounded
+      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+         const contact = contacts.find(c => c.id === sender)
+         const senderName = (contact && contact.name) || sender
+         // Must use the decrypted text — `text` here is still ciphertext.
+         const notifText = mediaType
+           ? (mediaType === 'audio' ? 'Sent a voice note' : `Sent ${mediaType === 'image' ? 'a photo' : `a ${mediaType}`}`)
+           : finalDecryptedText
+         try {
            const notification = new Notification(`New message from ${senderName}`, {
                body: notifText,
-               icon: '/logo192.png' // Use default react icon if exists
+               icon: '/logo192.png',
+               tag: newMessage.id,
            })
            notification.onclick = () => {
                window.focus()
                notification.close()
-               // We could also select the conversation here, but focus is good enough
            }
-        }
+         } catch (e) {
+           // Some browsers throw when constructing Notification outside a SW
+           console.warn('Notification failed', e)
+         }
       }
-
-      return newConversations
-    })
+    }
   }, [setConversations, id, contacts])
 
   // Request Notification Permissions on mount
@@ -235,43 +281,110 @@ export function ConversationsProvider({ id, children }) {
   }, [socket, addMessageToConversation])
 
   // ── Select conversation ───────────────────────────────────
+  // `selectionTick` increments on every selection, including re-selecting the
+  // conversation that is already active. Mobile needs that signal: after
+  // backing out to the list, tapping the same row must reopen the chat, and an
+  // unchanged index alone would not re-trigger the view switch.
   function selectConversationIndex(index) {
     setSelectedConversationIndex(index)
-    setUnreadCounts(prev => { const n = { ...prev }; delete n[index]; return n })
+    setSelectionTick(t => t + 1)
     const conv = conversations[index]
-    if (conv && socket) socket.emit('read-messages', { recipients: conv.recipients })
+    if (!conv) return
+    const convKey = getConvKey(conv.recipients)
+    setUnreadCounts(prev => { const n = { ...prev }; delete n[convKey]; return n })
+    if (socket) socket.emit('read-messages', { recipients: conv.recipients })
+  }
+
+  function deselectConversation() {
+    setSelectedConversationIndex(-1)
   }
 
   // ── Send text message ─────────────────────────────────────
-  function sendMessage(recipients, text, mediaUrl, mediaType, mediaName, replyToMsg) {
+  function sendMessage(recipients, text, mediaUrl, mediaType, mediaName, replyToMsg, mediaDuration) {
     const messageId = generateId()
-    
+
     // E2E Encryption
     const secretKey = [...recipients, id].sort().join(',')
     const encryptedText = text ? CryptoJS.AES.encrypt(text, secretKey).toString() : ''
-    
+
     // Encrypt replyTo text to prevent leakage
     let safeReplyTo = replyToMsg
     if (safeReplyTo && safeReplyTo.text) {
         safeReplyTo = { ...safeReplyTo, text: CryptoJS.AES.encrypt(safeReplyTo.text, secretKey).toString() }
     }
-    
-    socket.emit('send-message', { recipients, text: encryptedText, messageId, mediaUrl, mediaType, mediaName, replyTo: safeReplyTo })
+    // Strip fields the receiver rebuilds itself, so a quoted reply can't leak
+    // reactions or the local `fromMe` flag of the original message.
+    if (safeReplyTo) {
+        safeReplyTo = {
+            id: safeReplyTo.id,
+            sender: safeReplyTo.sender,
+            text: safeReplyTo.text,
+            mediaType: safeReplyTo.mediaType || null,
+            mediaName: safeReplyTo.mediaName || null,
+            deleted: !!safeReplyTo.deleted,
+        }
+    }
+
+    if (socket) {
+      socket.emit('send-message', {
+        recipients, text: encryptedText, messageId,
+        mediaUrl, mediaType, mediaName, mediaDuration, replyTo: safeReplyTo,
+      })
+    }
     // Save locally unencrypted
-    addMessageToConversation({ recipients, text, sender: id, messageId, mediaUrl, mediaType, mediaName, replyTo: replyToMsg })
+    addMessageToConversation({
+      recipients, text, sender: id, messageId,
+      mediaUrl, mediaType, mediaName, mediaDuration, replyTo: replyToMsg,
+    })
   }
 
   // ── Upload media then send ────────────────────────────────
-  async function sendMedia(recipients, file, caption, currentReplyTo) {
+  async function sendMedia(recipients, file, caption, currentReplyTo, extra = {}) {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await fetch(`${SERVER_URL}/upload`, { method: 'POST', body: formData })
-    if (!response.ok) throw new Error('Upload failed')
+
+    let response
+    try {
+      response = await fetch(`${SERVER_URL}/upload`, { method: 'POST', body: formData })
+    } catch (e) {
+      throw new Error('Could not reach the server. Check your connection and try again.')
+    }
+    if (!response.ok) {
+      let detail = ''
+      try { detail = (await response.json()).error } catch (e) { /* non-JSON error body */ }
+      throw new Error(detail || `Upload failed (${response.status})`)
+    }
+
     const { url, resourceType, originalName } = await response.json()
-    let mediaType = resourceType
-    if (resourceType === 'raw') mediaType = 'document'
-    if (file.type.startsWith('audio/') || originalName.endsWith('.webm')) mediaType = 'audio'
-    sendMessage(recipients, caption || '', url, mediaType, originalName || file.name, currentReplyTo || null)
+    const name = originalName || file.name || 'file'
+
+    // Cloudinary reports webm/ogg/mp4 audio as "video"; trust the browser's
+    // MIME type first, then the extension, before falling back to the
+    // resource type the CDN inferred.
+    let mediaType
+    if ((file.type || '').startsWith('audio/') || /\.(webm|ogg|mp3|m4a|wav|aac)$/i.test(name)) {
+      mediaType = 'audio'
+    } else if ((file.type || '').startsWith('image/') || resourceType === 'image') {
+      mediaType = 'image'
+    } else if ((file.type || '').startsWith('video/')) {
+      mediaType = 'video'
+    } else if (resourceType === 'video') {
+      mediaType = 'video'
+    } else {
+      mediaType = 'document'
+    }
+
+    // A recorded voice note carries its measured duration; the webm container
+    // MediaRecorder produces has no duration header, so the player needs it.
+    sendMessage(
+      recipients,
+      caption || '',
+      url,
+      mediaType,
+      name,
+      currentReplyTo || null,
+      extra.duration
+    )
     setReplyToState(null)
   }
 
@@ -348,13 +461,27 @@ export function ConversationsProvider({ id, children }) {
   }
 
   // ── Create conversation ───────────────────────────────────
+  // Returns the index of the conversation (existing or new) so the caller can
+  // open it immediately.
   function createConversation(recipients, groupName = null) {
-    setConversations(prev => [...prev, { 
-       recipients, 
+    if (!recipients || recipients.length === 0) return -1
+
+    const existingIndex = conversations.findIndex(c => arrayEquality(c.recipients, recipients))
+    if (existingIndex >= 0) {
+      selectConversationIndex(existingIndex)
+      return existingIndex
+    }
+
+    const newIndex = conversations.length
+    setConversations(prev => [...prev, {
+       recipients,
        messages: [],
        groupName,
-       admin: groupName ? id : null 
+       admin: groupName ? id : null
     }])
+    setSelectedConversationIndex(newIndex)
+    setSelectionTick(t => t + 1)
+    return newIndex
   }
 
   // ── Format conversations ──────────────────────────────────
@@ -370,7 +497,7 @@ export function ConversationsProvider({ id, children }) {
       return { ...message, senderName: name, fromMe }
     })
     const lastMessage = messages[messages.length - 1] || null
-    const unread = unreadCounts[index] || 0
+    const unread = unreadCounts[getConvKey(conversation.recipients)] || 0
     const isTyping = recipients.some(r => typingUsers[r.id])
     const isOnline = recipients.some(r => onlineUsers.has(r.id))
     const recipientLastSeen = recipients.length === 1 ? lastSeen[recipients[0].id] : null
@@ -382,15 +509,23 @@ export function ConversationsProvider({ id, children }) {
   const value = {
     conversations: formattedConversations,
     selectedConversation: formattedConversations[selectedConversationIndex],
+    // A conversation is "open" whenever a valid index is selected. Components
+    // must key mobile view transitions off this primitive rather than the
+    // formatted object, which is rebuilt (new identity) on every render.
+    hasSelectedConversation: selectedConversationIndex >= 0 && selectedConversationIndex < formattedConversations.length,
+    selectedConversationIndex,
+    selectionTick,
     sendMessage,
     sendMedia,
     selectConversationIndex,
+    deselectConversation,
     createConversation,
     emitTyping,
     setWallpaper,
     onlineUsers,
     lastSeen,
     deleteMessage,
+    editMessage,
     addReaction,
     replyTo,
     setReplyTo,

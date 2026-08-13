@@ -1,4 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* No @import for webfonts: a blocking external stylesheet stalls first paint
+   (and the window load event) whenever the network is slow or unavailable.
+   Inter is loaded asynchronously from index.html and simply falls back to the
+   system stack below if it never arrives. */
 
 /* ── Light theme (default) ── */
 :root {
@@ -9,7 +12,9 @@
   --sidebar-bg:    #ffffff;
   --header-bg:     #f0f2f5;
   --chat-bg:       #efeae2;
-  --chat-pattern:  url("https://web.whatsapp.com/img/bg-chat-tile-light_04fcacde539c58cca6745483d4858c52.png");
+  /* Inlined as a data URI. This used to hotlink web.whatsapp.com's CDN, so the
+     chat background vanished offline and the request delayed page load. */
+  --chat-pattern:  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'%3E%3Cg fill='none' stroke='%23000' stroke-opacity='.045' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='22' cy='24' r='9'/%3E%3Cpath d='M58 16h18v18H58zM104 20l10 10-10 10-10-10z'/%3E%3Cpath d='M14 66h20M14 74h13'/%3E%3Ccircle cx='72' cy='72' r='11'/%3E%3Cpath d='M108 62c6 0 10 4 10 10s-4 10-10 10'/%3E%3Cpath d='M20 108c5-8 13-8 18 0'/%3E%3Cpath d='M60 102h20v16H60z'/%3E%3Ccircle cx='112' cy='110' r='8'/%3E%3C/g%3E%3C/svg%3E");
   --input-area-bg: #f0f2f5;
   --input-bg:      #ffffff;
   --modal-bg:      #ffffff;
@@ -142,6 +147,17 @@ body {
 @keyframes typingDot {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
   30%            { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Referenced by the upload spinners and the call overlay — these were used
+   inline but never declared, so the spinners sat frozen. */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* ── Mobile ── */

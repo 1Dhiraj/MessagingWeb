@@ -16,10 +16,18 @@ export function CallProvider({ id, children }) {
   const [callActive, setCallActive] = useState(false)
   const [incomingCall, setIncomingCall] = useState(null) // { callerId, offer, isVideo }
   const [outgoingCall, setOutgoingCall] = useState(null) // { targetId, isVideo }
-  
+  // The peer we are actually connected to, and whether the call carries video.
+  // The old code derived both from `incomingCall`, which answerCall cleared —
+  // so the callee's video call rendered with the audio-only layout and
+  // hanging up emitted to a bogus "remote" room the caller never joined.
+  const [peer, setPeer] = useState(null) // { id, isVideo, direction }
+
   const peerConnectionRef = useRef(null)
   const localStreamRef = useRef(null)
-  
+  const peerIdRef = useRef(null)
+  const pendingCandidatesRef = useRef([])
+  const startingCallRef = useRef(false)
+
   // Update ref so socket handlers access latest stream
   useEffect(() => {
       localStreamRef.current = localStream
@@ -28,15 +36,37 @@ export function CallProvider({ id, children }) {
   const cleanupCall = useCallback(() => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop())
+      localStreamRef.current = null
     }
     setLocalStream(null)
     setRemoteStream(null)
     setIncomingCall(null)
     setOutgoingCall(null)
+    setPeer(null)
     setCallActive(false)
+    peerIdRef.current = null
+    pendingCandidatesRef.current = []
+    startingCallRef.current = false
     if (peerConnectionRef.current) {
-        peerConnectionRef.current.close()
+        try { peerConnectionRef.current.close() } catch (e) { /* already closed */ }
         peerConnectionRef.current = null
+    }
+  }, [])
+
+  // ICE candidates can arrive before setRemoteDescription has been called.
+  // addIceCandidate throws in that window, which silently broke connectivity
+  // on slower networks, so we buffer and flush them.
+  const flushPendingCandidates = useCallback(async () => {
+    const pc = peerConnectionRef.current
+    if (!pc || !pc.remoteDescription) return
+    const queued = pendingCandidatesRef.current
+    pendingCandidatesRef.current = []
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+      } catch (e) {
+        console.error('Error adding queued ICE candidate', e)
+      }
     }
   }, [])
 
@@ -56,13 +86,16 @@ export function CallProvider({ id, children }) {
     }
 
     pc.onicecandidate = (event) => {
-        if (event.candidate) {
+        if (event.candidate && socket) {
             socket.emit('call-ice-candidate', { targetId, candidate: event.candidate })
         }
     }
-    
+
     pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        // 'disconnected' is routinely transient (a brief network blip) and
+        // often recovers on its own; tearing down there dropped healthy calls.
+        // Only give up once the connection is genuinely done.
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
             cleanupCall()
         }
     }
@@ -72,10 +105,17 @@ export function CallProvider({ id, children }) {
   }, [socket, cleanupCall])
 
   const initiateCall = async (targetId, isVideo) => {
+    if (!socket) return
+    // Claim the slot synchronously: peerIdRef is only set once getUserMedia
+    // resolves, so a double click would otherwise start two calls.
+    if (peerIdRef.current || startingCallRef.current) return
+    startingCallRef.current = true
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: isVideo, audio: true })
         setLocalStream(stream)
         localStreamRef.current = stream
+        peerIdRef.current = targetId
+        setPeer({ id: targetId, isVideo, direction: 'outgoing' })
         setOutgoingCall({ targetId, isVideo })
         setCallActive(true)
 
@@ -86,43 +126,56 @@ export function CallProvider({ id, children }) {
         socket.emit('call-user', { userToCall: targetId, signalData: offer, from: id, isVideo })
     } catch (err) {
         console.error("Failed to start call", err)
-        alert("Failed to access camera/mic")
+        alert(isVideo
+          ? "Could not access your camera and microphone."
+          : "Could not access your microphone.")
         cleanupCall()
+    } finally {
+        startingCallRef.current = false
     }
   }
 
   const answerCall = async () => {
-    if (!incomingCall) return
+    if (!incomingCall || !socket) return
+    const { callerId, isVideo, offer } = incomingCall
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: incomingCall.isVideo, audio: true })
+        const stream = await navigator.mediaDevices.getUserMedia({ video: isVideo, audio: true })
         setLocalStream(stream)
         localStreamRef.current = stream
+        peerIdRef.current = callerId
+        // Record the peer *before* clearing incomingCall so the UI keeps
+        // rendering the video layout after the call is answered.
+        setPeer({ id: callerId, isVideo, direction: 'incoming' })
         setCallActive(true)
 
-        const pc = createPeerConnection(incomingCall.callerId, incomingCall.isVideo)
-        await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer))
-        
+        const pc = createPeerConnection(callerId, isVideo)
+        await pc.setRemoteDescription(new RTCSessionDescription(offer))
+        await flushPendingCandidates()
+
         const answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        socket.emit('make-answer', { to: incomingCall.callerId, signal: answer })
+        socket.emit('make-answer', { to: callerId, signal: answer })
         setIncomingCall(null)
     } catch (err) {
         console.error("Failed to answer call", err)
+        alert("Could not access your microphone/camera to answer.")
+        if (socket) socket.emit('call-rejected', { to: callerId })
         cleanupCall()
     }
   }
 
   const rejectCall = () => {
-      if (incomingCall) {
+      if (incomingCall && socket) {
           socket.emit('call-rejected', { to: incomingCall.callerId })
       }
       cleanupCall()
   }
 
   const endCall = () => {
-      const targetId = outgoingCall ? outgoingCall.targetId : (remoteStream ? 'remote' : null)
-      if (targetId) {
+      // Always route the hang-up to the real peer id, whichever side we are on.
+      const targetId = peerIdRef.current
+      if (targetId && socket) {
           socket.emit('end-call', { to: targetId })
       }
       cleanupCall()
@@ -132,30 +185,43 @@ export function CallProvider({ id, children }) {
     if (socket == null) return
 
     socket.on('call-user', ({ from, signal, isVideo }) => {
+        // Busy: politely reject rather than clobbering the call in progress.
+        if (peerIdRef.current) {
+            socket.emit('call-rejected', { to: from })
+            return
+        }
+        pendingCandidatesRef.current = []
         setIncomingCall({ callerId: from, offer: signal, isVideo })
     })
 
     socket.on('call-accepted', async (signal) => {
-        if (peerConnectionRef.current) {
+        if (!peerConnectionRef.current) return
+        try {
             await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(signal))
+            await flushPendingCandidates()
+        } catch (e) {
+            console.error('Failed to apply answer', e)
         }
     })
-    
+
     socket.on('call-ice-candidate', async (candidate) => {
-        if (peerConnectionRef.current) {
-            try {
-                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate))
-            } catch (e) {
-                console.error('Error adding received ice candidate', e)
-            }
+        const pc = peerConnectionRef.current
+        if (!pc || !pc.remoteDescription) {
+            // Offer/answer not exchanged yet — hold onto it.
+            pendingCandidatesRef.current.push(candidate)
+            return
+        }
+        try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        } catch (e) {
+            console.error('Error adding received ice candidate', e)
         }
     })
 
     socket.on('call-rejected', () => {
-        alert("Call was rejected")
         cleanupCall()
     })
-    
+
     socket.on('call-ended', () => {
         cleanupCall()
     })
@@ -167,7 +233,7 @@ export function CallProvider({ id, children }) {
         socket.off('call-rejected')
         socket.off('call-ended')
     }
-  }, [socket, cleanupCall])
+  }, [socket, cleanupCall, flushPendingCandidates])
 
   const value = {
       localStream,
@@ -175,6 +241,8 @@ export function CallProvider({ id, children }) {
       callActive,
       incomingCall,
       outgoingCall,
+      peer,
+      isVideoCall: peer ? peer.isVideo : (incomingCall ? incomingCall.isVideo : false),
       initiateCall,
       answerCall,
       rejectCall,

@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import Sidebar from './Sidebar';
 import OpenConversation from './OpenConversation';
 import { useConversations } from '../contexts/ConversationsProvider';
 import VideoCall from './VideoCall';
 
 export default function Dashboard({ id }) {
-  const { selectedConversation } = useConversations()
+  const { selectedConversation, hasSelectedConversation, selectionTick } = useConversations()
   const [mobileView, setMobileView] = useState('sidebar') // 'sidebar' | 'chat'
   const [viewportHeight, setViewportHeight] = useState('100vh')
 
@@ -33,16 +33,29 @@ export default function Dashboard({ id }) {
     }
   }, [])
 
-  // When a conversation is selected on mobile, switch to chat view
+  // When a conversation is selected on mobile, switch to chat view.
+  //
+  // This keys off `selectionTick`, a counter bumped by an explicit user
+  // selection. The old dependency was the conversation object, which the
+  // provider rebuilds on every render — so the effect re-ran after each
+  // keystroke and socket event and slammed the view back to 'chat', making the
+  // mobile back button appear to do nothing.
   useEffect(() => {
-    if (selectedConversation) {
-      setMobileView('chat')
-    }
-  }, [selectedConversation])
+    if (selectionTick > 0 && hasSelectedConversation) setMobileView('chat')
+  }, [selectionTick, hasSelectedConversation])
 
-  function handleBackToSidebar() {
+  const handleBackToSidebar = useCallback(() => {
     setMobileView('sidebar')
-  }
+  }, [])
+
+  // Android/browser back gesture should leave the chat before leaving the app.
+  useEffect(() => {
+    if (mobileView !== 'chat') return
+    window.history.pushState({ chat: true }, '')
+    function onPop() { setMobileView('sidebar') }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [mobileView])
 
   return (
     <div
@@ -51,8 +64,11 @@ export default function Dashboard({ id }) {
         display: 'flex',
         flexDirection: 'row',
         height: viewportHeight,
-        backgroundColor: '#efeae2',
-        backgroundImage: 'url("https://web.whatsapp.com/img/bg-chat-tile-light_04fcacde539c58cca6745483d4858c52.png")',
+        // Themed variables instead of hard-coded light-mode values — the old
+        // background stayed cream in dark mode and pulled a tile image from
+        // web.whatsapp.com on every load.
+        backgroundColor: 'var(--chat-bg)',
+        backgroundImage: 'var(--chat-pattern)',
         backgroundRepeat: 'repeat',
         backgroundSize: '400px',
         overflow: 'hidden'
@@ -65,8 +81,8 @@ export default function Dashboard({ id }) {
         style={{
           width: '340px',
           minWidth: '340px',
-          backgroundColor: 'white',
-          borderRight: '1px solid #d1d7db',
+          backgroundColor: 'var(--sidebar-bg)',
+          borderRight: '1px solid var(--border-color)',
           zIndex: 10,
           boxShadow: '2px 0 8px rgba(0,0,0,0.03)',
           display: 'flex',
@@ -105,7 +121,7 @@ export default function Dashboard({ id }) {
                   position: 'absolute',
                   top: '16px',
                   left: '16px',
-                  background: 'white',
+                  background: 'var(--sidebar-bg)',
                   border: 'none',
                   borderRadius: '50%',
                   width: '40px',
@@ -119,7 +135,7 @@ export default function Dashboard({ id }) {
                 }}
                 aria-label="Open Sidebar"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#667781">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="var(--text-muted)">
                   <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
                 </svg>
               </button>
@@ -129,7 +145,7 @@ export default function Dashboard({ id }) {
                   width: '120px',
                   height: '120px',
                   borderRadius: '50%',
-                  backgroundColor: 'white',
+                  backgroundColor: 'var(--sidebar-bg)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -138,14 +154,14 @@ export default function Dashboard({ id }) {
                 }}
                 className="animate-fade-in-scale"
               >
-                <svg width="60" height="60" viewBox="0 0 24 24" fill="#aebac1">
+                <svg width="60" height="60" viewBox="0 0 24 24" fill="var(--avatar-icon)">
                   <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 5C13.66 5 15 6.34 15 8C15 9.66 13.66 11 12 11C10.34 11 9 9.66 9 8C9 6.34 10.34 5 12 5ZM12 19.2C9.5 19.2 7.29 17.92 6 15.98C6.03 13.99 10 12.9 12 12.9C13.99 12.9 17.97 13.99 18 15.98C16.71 17.92 14.5 19.2 12 19.2Z" />
                 </svg>
               </div>
-              <h2 className="font-weight-bold animate-slide-up" style={{ color: '#41525d', marginBottom: '1rem' }}>
+              <h2 className="font-weight-bold animate-slide-up" style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
                 Welcome to Chat App
               </h2>
-              <p className="text-muted animate-slide-up" style={{ fontSize: '1.1rem', maxWidth: '400px', animationDelay: '0.1s' }}>
+              <p className="animate-slide-up" style={{ fontSize: '1.1rem', maxWidth: '400px', animationDelay: '0.1s', color: 'var(--text-muted)' }}>
                 Send and receive messages seamlessly. Add a contact using their <strong>unique ID</strong> and start a conversation.
               </p>
             </div>
